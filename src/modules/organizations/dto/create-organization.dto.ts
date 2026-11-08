@@ -1,5 +1,34 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, IsEmail } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsEmail,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class OrganizationAdminDto {
+  @ApiProperty({ example: 'Adaeze' })
+  @IsNotEmpty()
+  @IsString()
+  firstName: string;
+
+  @ApiProperty({ example: 'Okonkwo' })
+  @IsNotEmpty()
+  @IsString()
+  lastName: string;
+
+  @ApiProperty({ example: 'admin@acme-events.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiProperty({ example: 'TempPass#2026', description: 'Temporary password for first sign-in' })
+  @IsString()
+  @MinLength(8)
+  password: string;
+}
 
 export class CreateOrganizationDto {
   @ApiProperty({ example: 'Acme Events Ltd' })
@@ -31,4 +60,10 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @ApiPropertyOptional({ type: () => OrganizationAdminDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OrganizationAdminDto)
+  admin?: OrganizationAdminDto;
 }

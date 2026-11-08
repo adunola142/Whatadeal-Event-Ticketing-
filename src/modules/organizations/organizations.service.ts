@@ -7,6 +7,12 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import {
+  AccessScope,
+  isPlatformAdmin,
+  requireOrgAccess,
+} from '../../common/utils/organization-scope';
 
 @Injectable()
 export class OrganizationsService {
@@ -20,6 +26,12 @@ export class OrganizationsService {
       email?: string;
       phone?: string;
       address?: string;
+      admin?: {
+        firstName: string;
+        lastName: string;
+        email: string;
+        password: string;
+      };
     },
     createdById: string,
   ) {
@@ -36,17 +48,55 @@ export class OrganizationsService {
       throw new ConflictException('Organization with this name already exists');
     }
 
-    return this.prisma.organization.create({
-      data: {
-        name: data.name,
-        slug,
-        description: data.description,
-        website: data.website,
-        email: data.email,
-        phone: data.phone,
-        address: data.address,
-        createdById,
-      },
+    const { admin, ...orgData } = data;
+
+    if (admin) {
+      const adminExists = await this.prisma.user.findUnique({
+        where: { email: admin.email },
+      });
+      if (adminExists) {
+        throw new ConflictException('Administrator email already registered');
+      }
+    }
+
+    const passwordHash = admin ? await bcrypt.hash(admin.password, 12) : null;
+
+    return this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.create({
+        data: {
+          name: orgData.name,
+          slug,
+          description: orgData.description,
+          website: orgData.website,
+          email: orgData.email,
+          phone: orgData.phone,
+          address: orgData.address,
+          createdById,
+        },
+      });
+
+      if (!admin || !passwordHash) return organization;
+
+      const adminUser = await tx.user.create({
+        data: {
+          email: admin.email,
+          passwordHash,
+          firstName: admin.firstName,
+          lastName: admin.lastName,
+          role: UserRole.ORG_ADMIN,
+        },
+        select: { id: true, email: true, firstName: true, lastName: true, role: true },
+      });
+
+      await tx.organizationMember.create({
+        data: {
+          userId: adminUser.id,
+          organizationId: organization.id,
+          role: UserRole.ORG_ADMIN,
+        },
+      });
+
+      return { ...organization, admin: adminUser };
     });
   }
 
@@ -82,7 +132,7 @@ export class OrganizationsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, scope?: AccessScope) {
     const org = await this.prisma.organization.findUnique({
       where: { id },
       include: {
@@ -103,6 +153,7 @@ export class OrganizationsService {
       },
     });
     if (!org) throw new NotFoundException('Organization not found');
+    if (scope) await requireOrgAccess(this.prisma, scope, id);
     return org;
   }
 
@@ -138,8 +189,15 @@ export class OrganizationsService {
   async addMember(
     orgId: string,
     data: { userId: string; role: UserRole },
+    scope?: AccessScope,
   ) {
     await this.findOne(orgId);
+    if (scope) {
+      await requireOrgAccess(this.prisma, scope, orgId);
+      if (!isPlatformAdmin(scope.role) && data.role === UserRole.SUPER_ADMIN) {
+        throw new ForbiddenException('Only Whatadeal admins can add super admins');
+      }
+    }
 
     const existing = await this.prisma.organizationMember.findUnique({
       where: { userId_organizationId: { userId: data.userId, organizationId: orgId } },
@@ -160,7 +218,8 @@ export class OrganizationsService {
     });
   }
 
-  async removeMember(orgId: string, userId: string) {
+  async removeMember(orgId: string, userId: string, scope?: AccessScope) {
+    if (scope) await requireOrgAccess(this.prisma, scope, orgId);
     const member = await this.prisma.organizationMember.findUnique({
       where: { userId_organizationId: { userId, organizationId: orgId } },
     });

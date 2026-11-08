@@ -1,4 +1,10 @@
 import {
+  AccessScope,
+  isPlatformAdmin,
+  requireOrgAccess,
+  userOrganizationIds,
+} from '../../common/utils/organization-scope';
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -60,18 +66,29 @@ export class SettlementsService {
     });
   }
 
-  async findAll(query: {
-    page?: number;
-    limit?: number;
-    organizationId?: string;
-    status?: SettlementStatus;
-  }) {
+  async findAll(
+    query: {
+      page?: number;
+      limit?: number;
+      organizationId?: string;
+      status?: SettlementStatus;
+    },
+    scope?: AccessScope,
+  ) {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (query.organizationId) where.organizationId = query.organizationId;
+    if (scope && !isPlatformAdmin(scope.role)) {
+      const ids = await userOrganizationIds(this.prisma, scope.userId);
+      where.organizationId =
+        query.organizationId && ids.includes(query.organizationId)
+          ? query.organizationId
+          : { in: ids };
+    } else if (query.organizationId) {
+      where.organizationId = query.organizationId;
+    }
     if (query.status) where.status = query.status;
 
     const [settlements, total] = await Promise.all([
@@ -90,11 +107,12 @@ export class SettlementsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, scope?: AccessScope) {
     const settlement = await this.prisma.settlement.findUnique({
       where: { id },
     });
     if (!settlement) throw new NotFoundException('Settlement not found');
+    if (scope) await requireOrgAccess(this.prisma, scope, settlement.organizationId);
     return settlement;
   }
 

@@ -1,1 +1,1 @@
-export { CreateOrganizationDto } from './create-organization.dto';
+export { CreateOrganizationDto, OrganizationAdminDto } from './create-organization.dto';

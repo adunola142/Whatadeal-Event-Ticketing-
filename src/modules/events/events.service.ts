@@ -6,6 +6,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventStatus, UserRole } from '@prisma/client';
+import {
+  AccessScope,
+  isPlatformAdmin,
+  requireEventAccess,
+  requireOrgAccess,
+  requireTransactionAccess,
+  userOrganizationIds,
+} from '../../common/utils/organization-scope';
 
 @Injectable()
 export class EventsService {
@@ -27,7 +35,9 @@ export class EventsService {
       bannerImage?: string;
     },
     organizationId: string,
+    scope?: AccessScope,
   ) {
+    if (scope) await requireOrgAccess(this.prisma, scope, organizationId);
     const slug = this.generateSlug(data.title);
 
     return this.prisma.event.create({
@@ -51,20 +61,31 @@ export class EventsService {
     });
   }
 
-  async findAll(query: {
-    page?: number;
-    limit?: number;
-    status?: EventStatus;
-    organizationId?: string;
-    search?: string;
-  }) {
+  async findAll(
+    query: {
+      page?: number;
+      limit?: number;
+      status?: EventStatus;
+      organizationId?: string;
+      search?: string;
+    },
+    scope?: { userId: string; role: UserRole },
+  ) {
     const page = query.page || 1;
     const limit = query.limit || 20;
     const skip = (page - 1) * limit;
 
     const where: any = {};
     if (query.status) where.status = query.status;
-    if (query.organizationId) where.organizationId = query.organizationId;
+    if (scope && !isPlatformAdmin(scope.role)) {
+      const ids = await userOrganizationIds(this.prisma, scope.userId);
+      where.organizationId =
+        query.organizationId && ids.includes(query.organizationId)
+          ? query.organizationId
+          : { in: ids };
+    } else if (query.organizationId) {
+      where.organizationId = query.organizationId;
+    }
     if (query.search) {
       where.OR = [
         { title: { contains: query.search, mode: 'insensitive' } },
@@ -92,7 +113,7 @@ export class EventsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, scope?: AccessScope) {
     const event = await this.prisma.event.findUnique({
       where: { id },
       include: {
@@ -102,6 +123,7 @@ export class EventsService {
       },
     });
     if (!event) throw new NotFoundException('Event not found');
+    if (scope) await requireOrgAccess(this.prisma, scope, event.organizationId);
     return event;
   }
 
@@ -279,8 +301,8 @@ export class EventsService {
   /**
    * Cancel an event
    */
-  async cancel(id: string) {
-    const event = await this.findOne(id);
+  async cancel(id: string, scope?: AccessScope) {
+    const event = await this.findOne(id, scope);
 
     if (([EventStatus.COMPLETED, EventStatus.CANCELLED] as EventStatus[]).includes(event.status)) {
       throw new BadRequestException('Event cannot be cancelled');

@@ -13,7 +13,8 @@ import { UserRole, SettlementStatus } from '@prisma/client';
 import { SettlementsService } from './settlements.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { Roles } from '../../common/decorators';
+import { Roles, CurrentUser } from '../../common/decorators';
+import { scopeOf } from '../../common/utils/organization-scope';
 
 @ApiTags('Settlements')
 @ApiBearerAuth()
@@ -46,15 +47,24 @@ export class SettlementsController {
     @Query('limit') limit?: number,
     @Query('organizationId') organizationId?: string,
     @Query('status') status?: SettlementStatus,
+    @CurrentUser('id') actorId?: string,
+    @CurrentUser('role') actorRole?: UserRole,
   ) {
-    return this.service.findAll({ page, limit, organizationId, status });
+    return this.service.findAll(
+      { page, limit, organizationId, status },
+      actorId && actorRole ? scopeOf(actorId, actorRole) : undefined,
+    );
   }
 
   @Get(':id')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
   @ApiOperation({ summary: 'Get settlement by ID' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.service.findOne(id, scopeOf(actorId, actorRole));
   }
 
   @Patch(':id/status')

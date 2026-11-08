@@ -16,6 +16,7 @@ import { CreateEventDto, UpdateEventDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { scopeOf } from '../../common/utils/organization-scope';
 
 @ApiTags('Events')
 @ApiBearerAuth()
@@ -27,9 +28,13 @@ export class EventsController {
   @Post()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.EVENT_MANAGER)
   @ApiOperation({ summary: 'Create a new event' })
-  create(@Body() data: CreateEventDto) {
+  create(
+    @Body() data: CreateEventDto,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
     const { organizationId, ...eventData } = data;
-    return this.eventsService.create(eventData, organizationId);
+    return this.eventsService.create(eventData, organizationId, scopeOf(actorId, actorRole));
   }
 
   @Get()
@@ -45,14 +50,23 @@ export class EventsController {
     @Query('status') status?: EventStatus,
     @Query('organizationId') organizationId?: string,
     @Query('search') search?: string,
+    @CurrentUser('id') userId?: string,
+    @CurrentUser('role') userRole?: UserRole,
   ) {
-    return this.eventsService.findAll({ page, limit, status, organizationId, search });
+    return this.eventsService.findAll(
+      { page, limit, status, organizationId, search },
+      userId && userRole ? { userId, role: userRole } : undefined,
+    );
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get event by ID' })
-  findOne(@Param('id') id: string) {
-    return this.eventsService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.eventsService.findOne(id, scopeOf(actorId, actorRole));
   }
 
   @Put(':id')
@@ -126,7 +140,11 @@ export class EventsController {
   @Patch(':id/cancel')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
   @ApiOperation({ summary: 'Cancel event' })
-  cancel(@Param('id') id: string) {
-    return this.eventsService.cancel(id);
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.eventsService.cancel(id, scopeOf(actorId, actorRole));
   }
 }

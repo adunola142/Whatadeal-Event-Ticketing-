@@ -1,6 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EventStatus, TransactionStatus } from '@prisma/client';
+import {
+  EventStatus,
+  TicketStatus,
+  TransactionStatus,
+  UserRole,
+} from '@prisma/client';
+import {
+  AccessScope,
+  isPlatformAdmin,
+  requireEventAccess,
+  userOrganizationIds,
+} from '../../common/utils/organization-scope';
 
 @Injectable()
 export class DashboardService {
@@ -49,12 +60,28 @@ export class DashboardService {
   /**
    * Organization dashboard: org-specific stats
    */
-  async getOrgStats(organizationId: string) {
-    const [totalEvents, activeEvents, revenue, transactions] =
-      await Promise.all([
+  async getOrgStats(organizationId: string, userId: string, role: UserRole) {
+    if (!isPlatformAdmin(role)) {
+      const ids = await userOrganizationIds(this.prisma, userId);
+      if (!ids.includes(organizationId)) {
+        throw new ForbiddenException('Not a member of this organization');
+      }
+    }
+
+    const [
+      totalEvents,
+      activeEvents,
+      pendingApproval,
+      revenue,
+      transactions,
+      ticketsSold,
+    ] = await Promise.all([
         this.prisma.event.count({ where: { organizationId } }),
         this.prisma.event.count({
           where: { organizationId, status: EventStatus.ACTIVE },
+        }),
+        this.prisma.event.count({
+          where: { organizationId, status: EventStatus.PENDING_APPROVAL },
         }),
         this.prisma.transaction.aggregate({
           where: {
@@ -69,20 +96,30 @@ export class DashboardService {
             status: TransactionStatus.COMPLETED,
           },
         }),
+        this.prisma.ticket.count({
+          where: {
+            ticketCategory: { event: { organizationId } },
+            status: { in: [TicketStatus.VALID, TicketStatus.USED] },
+            transaction: { status: TransactionStatus.COMPLETED },
+          },
+        }),
       ]);
 
     return {
       totalEvents,
       activeEvents,
+      pendingApproval,
       totalRevenue: revenue._sum.totalAmount || 0,
       totalTransactions: transactions,
+      totalTicketsSold: ticketsSold,
     };
   }
 
   /**
    * Event-level stats
    */
-  async getEventStats(eventId: string) {
+  async getEventStats(eventId: string, scope?: AccessScope) {
+    if (scope) await requireEventAccess(this.prisma, scope, eventId);
     const [event, revenue, transactionCount, ticketsSold] = await Promise.all([
       this.prisma.event.findUnique({
         where: { id: eventId },

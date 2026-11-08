@@ -17,6 +17,7 @@ import { CreateOrganizationDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { scopeOf } from '../../common/utils/organization-scope';
 
 @ApiTags('Organizations')
 @ApiBearerAuth()
@@ -57,8 +58,12 @@ export class OrganizationsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get organization by ID' })
-  findOne(@Param('id') id: string) {
-    return this.orgService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.orgService.findOne(id, scopeOf(actorId, actorRole));
   }
 
   @Put(':id')
@@ -86,15 +91,22 @@ export class OrganizationsController {
   addMember(
     @Param('id') orgId: string,
     @Body() data: { userId: string; role: UserRole },
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
   ) {
-    return this.orgService.addMember(orgId, data);
+    return this.orgService.addMember(orgId, data, scopeOf(actorId, actorRole));
   }
 
   @Delete(':id/members/:userId')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
   @ApiOperation({ summary: 'Remove member from organization' })
-  removeMember(@Param('id') orgId: string, @Param('userId') userId: string) {
-    return this.orgService.removeMember(orgId, userId);
+  removeMember(
+    @Param('id') orgId: string,
+    @Param('userId') userId: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.orgService.removeMember(orgId, userId, scopeOf(actorId, actorRole));
   }
 
   @Patch(':id/toggle-active')

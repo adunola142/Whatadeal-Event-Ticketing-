@@ -14,6 +14,13 @@ import {
 } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcrypt';
+import {
+  AccessScope,
+  isPlatformAdmin,
+  requireEventAccess,
+  requireTransactionAccess,
+  userOrganizationIds,
+} from '../../common/utils/organization-scope';
 
 @Injectable()
 export class POSService {
@@ -526,9 +533,106 @@ export class POSService {
   }
 
   /**
+   * List all transactions (admin). Returns data in a shape compatible with the admin UI.
+   */
+  async listTransactions(
+    query: {
+      page?: number;
+      limit?: number;
+      status?: TransactionStatus;
+      search?: string;
+    },
+    scope?: { userId: string; role: UserRole },
+  ) {
+    const page = Number(query.page) || 1;
+    const limit = Math.min(Number(query.limit) || 50, 200);
+    const skip = (page - 1) * limit;
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (scope && !isPlatformAdmin(scope.role)) {
+      const ids = await userOrganizationIds(this.prisma, scope.userId);
+      where.event = { organizationId: { in: ids } };
+    }
+    if (query.search) {
+      where.OR = [
+        { transactionRef: { contains: query.search, mode: 'insensitive' } },
+        { customerName: { contains: query.search, mode: 'insensitive' } },
+        { customerEmail: { contains: query.search, mode: 'insensitive' } },
+        { paymentReference: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+    const [transactions, total] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          items: { select: { quantity: true } },
+          event: { select: { id: true, title: true } },
+          operator: {
+            include: { user: { select: { firstName: true, lastName: true } } },
+          },
+        },
+      }),
+      this.prisma.transaction.count({ where }),
+    ]);
+    return {
+      data: transactions.map((t) => ({
+        ...t,
+        totalAmount: Number(t.totalAmount),
+        amount: Number(t.totalAmount),
+        ref: t.transactionRef,
+        quantity: t.items.reduce((s, i) => s + i.quantity, 0),
+      })),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * List all refunds (admin).
+   */
+  async listRefunds(
+    query: { page?: number; limit?: number; status?: string },
+    scope?: { userId: string; role: UserRole },
+  ) {
+    const page = Number(query.page) || 1;
+    const limit = Math.min(Number(query.limit) || 50, 200);
+    const skip = (page - 1) * limit;
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (scope && !isPlatformAdmin(scope.role)) {
+      const ids = await userOrganizationIds(this.prisma, scope.userId);
+      where.transaction = { event: { organizationId: { in: ids } } };
+    }
+    const [refunds, total] = await Promise.all([
+      this.prisma.refund.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          transaction: { select: { transactionRef: true, eventId: true } },
+        },
+      }),
+      this.prisma.refund.count({ where }),
+    ]);
+    return {
+      data: refunds.map((r) => ({
+        ...r,
+        amount: Number(r.amount),
+        requestedAt: r.createdAt,
+        requestedBy: r.transaction?.transactionRef ?? undefined,
+        transactionRef: r.transaction?.transactionRef,
+      })),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
    * Get transaction details
    */
-  async getTransaction(transactionRef: string) {
+  async getTransaction(transactionRef: string, scope?: AccessScope) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { transactionRef },
       include: {
@@ -539,11 +643,13 @@ export class POSService {
         },
         tickets: true,
         receipt: true,
-        event: { select: { id: true, title: true, venue: true } },
+        event: { select: { id: true, title: true, venue: true, organizationId: true } },
+        operator: { select: { userId: true } },
       },
     });
 
     if (!transaction) throw new NotFoundException('Transaction not found');
+    if (scope) await requireTransactionAccess(this.prisma, scope, transaction);
     return transaction;
   }
 
@@ -553,7 +659,9 @@ export class POSService {
   async getEventTransactions(
     eventId: string,
     query: { page?: number; limit?: number; status?: TransactionStatus },
+    scope?: AccessScope,
   ) {
+    if (scope) await requireEventAccess(this.prisma, scope, eventId);
     const page = query.page || 1;
     const limit = query.limit || 50;
     const skip = (page - 1) * limit;
@@ -754,24 +862,36 @@ export class POSService {
     return result;
   }
 
-  async getRefund(id: string) {
+  async getRefund(id: string, scope?: AccessScope) {
     const refund = await this.prisma.refund.findUnique({
       where: { id },
       include: {
         transaction: {
-          select: { transactionRef: true, eventId: true, totalAmount: true },
+          select: {
+            transactionRef: true,
+            eventId: true,
+            totalAmount: true,
+            event: { select: { organizationId: true } },
+            operator: { select: { userId: true } },
+          },
         },
       },
     });
     if (!refund) throw new NotFoundException('Refund not found');
+    if (scope) await requireTransactionAccess(this.prisma, scope, refund.transaction);
     return refund;
   }
 
-  async getTransactionRefunds(transactionRef: string) {
+  async getTransactionRefunds(transactionRef: string, scope?: AccessScope) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { transactionRef },
+      include: {
+        event: { select: { organizationId: true } },
+        operator: { select: { userId: true } },
+      },
     });
     if (!transaction) throw new NotFoundException('Transaction not found');
+    if (scope) await requireTransactionAccess(this.prisma, scope, transaction);
 
     return this.prisma.refund.findMany({
       where: { transactionId: transaction.id },
@@ -783,13 +903,13 @@ export class POSService {
   // 3. RECEIPTS
   // ============================================
 
-  async getReceipt(id: string) {
+  async getReceipt(id: string, scope?: AccessScope) {
     const receipt = await this.prisma.receipt.findUnique({
       where: { id },
       include: {
         transaction: {
           include: {
-            event: { select: { title: true, venue: true } },
+            event: { select: { title: true, venue: true, organizationId: true } },
             items: {
               include: {
                 ticketCategory: { select: { name: true, price: true } },
@@ -805,20 +925,41 @@ export class POSService {
       },
     });
     if (!receipt) throw new NotFoundException('Receipt not found');
+    if (scope) await requireTransactionAccess(this.prisma, scope, receipt.transaction);
     return receipt;
   }
 
-  async getReceiptByTransaction(transactionRef: string) {
+  async getReceiptByTransaction(transactionRef: string, scope?: AccessScope) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { transactionRef },
-      include: { receipt: true },
+      include: {
+        receipt: true,
+        event: { select: { organizationId: true } },
+        operator: { select: { userId: true } },
+      },
     });
     if (!transaction) throw new NotFoundException('Transaction not found');
+    if (scope) await requireTransactionAccess(this.prisma, scope, transaction);
     if (!transaction.receipt) throw new NotFoundException('Receipt not found');
     return transaction.receipt;
   }
 
-  async markReceiptPrinted(id: string) {
+  async markReceiptPrinted(id: string, scope?: AccessScope) {
+    if (scope) {
+      const receipt = await this.prisma.receipt.findUnique({
+        where: { id },
+        include: {
+          transaction: {
+            include: {
+              event: { select: { organizationId: true } },
+              operator: { select: { userId: true } },
+            },
+          },
+        },
+      });
+      if (!receipt) throw new NotFoundException('Receipt not found');
+      await requireTransactionAccess(this.prisma, scope, receipt.transaction);
+    }
     return this.prisma.receipt.update({
       where: { id },
       data: { printedAt: new Date() },

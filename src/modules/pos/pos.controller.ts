@@ -25,6 +25,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, CurrentUser } from '../../common/decorators';
+import { scopeOf } from '../../common/utils/organization-scope';
 
 @ApiTags('POS')
 @ApiBearerAuth()
@@ -122,10 +123,35 @@ export class POSController {
     });
   }
 
+  @Get('transactions')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
+  @ApiOperation({ summary: 'List all transactions (Admin)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  listTransactions(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: TransactionStatus,
+    @Query('search') search?: string,
+    @CurrentUser('id') userId?: string,
+    @CurrentUser('role') userRole?: UserRole,
+  ) {
+    return this.posService.listTransactions(
+      { page, limit, status, search },
+      userId && userRole ? { userId, role: userRole } : undefined,
+    );
+  }
+
   @Get('transactions/:ref')
   @ApiOperation({ summary: 'Get transaction by reference' })
-  getTransaction(@Param('ref') ref: string) {
-    return this.posService.getTransaction(ref);
+  getTransaction(
+    @Param('ref') ref: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.posService.getTransaction(ref, scopeOf(actorId, actorRole));
   }
 
   @Get('transactions/event/:eventId')
@@ -139,8 +165,14 @@ export class POSController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('status') status?: TransactionStatus,
+    @CurrentUser('id') actorId?: string,
+    @CurrentUser('role') actorRole?: UserRole,
   ) {
-    return this.posService.getEventTransactions(eventId, { page, limit, status });
+    return this.posService.getEventTransactions(
+      eventId,
+      { page, limit, status },
+      actorId && actorRole ? scopeOf(actorId, actorRole) : undefined,
+    );
   }
 
   // ---- Ticket Validation ----
@@ -164,39 +196,78 @@ export class POSController {
     return this.posService.processRefund(data);
   }
 
+  @Get('refunds')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
+  @ApiOperation({ summary: 'List refunds (Admin)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  listRefunds(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+    @CurrentUser('id') userId?: string,
+    @CurrentUser('role') userRole?: UserRole,
+  ) {
+    return this.posService.listRefunds(
+      { page, limit, status },
+      userId && userRole ? { userId, role: userRole } : undefined,
+    );
+  }
+
   @Get('refunds/:id')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
   @ApiOperation({ summary: 'Get refund details' })
-  getRefund(@Param('id') id: string) {
-    return this.posService.getRefund(id);
+  getRefund(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.posService.getRefund(id, scopeOf(actorId, actorRole));
   }
 
   @Get('refunds/transaction/:transactionRef')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
   @ApiOperation({ summary: 'Get refunds for a transaction' })
-  getTransactionRefunds(@Param('transactionRef') transactionRef: string) {
-    return this.posService.getTransactionRefunds(transactionRef);
+  getTransactionRefunds(
+    @Param('transactionRef') transactionRef: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.posService.getTransactionRefunds(transactionRef, scopeOf(actorId, actorRole));
   }
 
   // ---- Receipts ----
 
   @Get('receipts/:id')
   @ApiOperation({ summary: 'Get receipt by ID' })
-  getReceipt(@Param('id') id: string) {
-    return this.posService.getReceipt(id);
+  getReceipt(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.posService.getReceipt(id, scopeOf(actorId, actorRole));
   }
 
   @Get('receipts/transaction/:transactionRef')
   @ApiOperation({ summary: 'Get receipt by transaction reference' })
-  getReceiptByTransaction(@Param('transactionRef') transactionRef: string) {
-    return this.posService.getReceiptByTransaction(transactionRef);
+  getReceiptByTransaction(
+    @Param('transactionRef') transactionRef: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.posService.getReceiptByTransaction(transactionRef, scopeOf(actorId, actorRole));
   }
 
   @Patch('receipts/:id/printed')
   @Roles(UserRole.POS_OPERATOR)
   @ApiOperation({ summary: 'Mark receipt as printed' })
-  markReceiptPrinted(@Param('id') id: string) {
-    return this.posService.markReceiptPrinted(id);
+  markReceiptPrinted(
+    @Param('id') id: string,
+    @CurrentUser('id') actorId: string,
+    @CurrentUser('role') actorRole: UserRole,
+  ) {
+    return this.posService.markReceiptPrinted(id, scopeOf(actorId, actorRole));
   }
 
   // ---- Device Assignments ----

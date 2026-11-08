@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventStatus } from '@prisma/client';
+import {
+  AccessScope,
+  requireEventAccess,
+  requireOrgAccess,
+} from '../../common/utils/organization-scope';
 
 @Injectable()
 export class TicketCategoriesService {
@@ -20,12 +25,13 @@ export class TicketCategoriesService {
     sortOrder?: number;
     salesStartDate?: string;
     salesEndDate?: string;
-  }) {
+  }, scope?: AccessScope) {
     // Verify event exists and is in editable state
     const event = await this.prisma.event.findUnique({
       where: { id: data.eventId },
     });
     if (!event) throw new NotFoundException('Event not found');
+    if (scope) await requireOrgAccess(this.prisma, scope, event.organizationId);
 
     if (
       !([
@@ -59,19 +65,21 @@ export class TicketCategoriesService {
     });
   }
 
-  async findByEvent(eventId: string) {
+  async findByEvent(eventId: string, scope?: AccessScope) {
+    if (scope) await requireEventAccess(this.prisma, scope, eventId, { allowAssignedOperator: true });
     return this.prisma.ticketCategory.findMany({
       where: { eventId },
       orderBy: { sortOrder: 'asc' },
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, scope?: AccessScope) {
     const category = await this.prisma.ticketCategory.findUnique({
       where: { id },
       include: { event: { select: { id: true, title: true, status: true } } },
     });
     if (!category) throw new NotFoundException('Ticket category not found');
+    if (scope) await requireEventAccess(this.prisma, scope, category.eventId, { allowAssignedOperator: true });
     return category;
   }
 
@@ -86,8 +94,10 @@ export class TicketCategoriesService {
       sortOrder?: number;
       isActive?: boolean;
     },
+    scope?: AccessScope,
   ) {
     const category = await this.findOne(id);
+    if (scope) await requireEventAccess(this.prisma, scope, category.eventId);
 
     // Cannot reduce totalQuantity below soldQuantity
     if (
@@ -125,8 +135,9 @@ export class TicketCategoriesService {
    * Delete a ticket category.
    * Only allowed if no tickets have been sold.
    */
-  async delete(id: string) {
+  async delete(id: string, scope?: AccessScope) {
     const category = await this.findOne(id);
+    if (scope) await requireEventAccess(this.prisma, scope, category.eventId);
 
     if (category.soldQuantity > 0) {
       throw new BadRequestException(

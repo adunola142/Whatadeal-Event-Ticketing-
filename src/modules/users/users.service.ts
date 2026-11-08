@@ -116,6 +116,19 @@ export class UsersService {
     });
   }
 
+  async resetPassword(id: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash, refreshToken: null },
+    });
+
+    return { message: `Temporary password set for ${user.email}` };
+  }
+
   /**
    * Create a user with a specific role (super admin action)
    */
