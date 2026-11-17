@@ -91,6 +91,7 @@ model User {
   role           UserRole  @default(POS_OPERATOR)
   isActive       Boolean   @default(true) @map("is_active")
   emailVerified  Boolean   @default(false) @map("email_verified")
+  mustChangePassword Boolean @default(false) @map("must_change_password")
   lastLoginAt    DateTime? @map("last_login_at")
   refreshToken   String?   @map("refresh_token")
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -477,4 +478,16 @@ model Settlement {
   @@index([organizationId])
   @@index([status])
   @@map("settlements")
+}
+
+// ============================================
+// PLATFORM SETTINGS (key/value, single row per key)
+// ============================================
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
 }

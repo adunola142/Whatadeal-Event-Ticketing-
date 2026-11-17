@@ -84,6 +84,7 @@ export class OrganizationsService {
           firstName: admin.firstName,
           lastName: admin.lastName,
           role: UserRole.ORG_ADMIN,
+          mustChangePassword: true,
         },
         select: { id: true, email: true, firstName: true, lastName: true, role: true },
       });

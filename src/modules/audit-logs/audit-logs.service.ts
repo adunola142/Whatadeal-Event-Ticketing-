@@ -66,8 +66,34 @@ export class AuditLogsService {
       this.prisma.auditLog.count({ where }),
     ]);
 
+    const categoryOf = (entity: string) =>
+      ({
+        organizations: 'organization',
+        events: 'event',
+        'ticket-categories': 'event',
+        pos: 'pos',
+        transactions: 'payment',
+        refunds: 'payment',
+        settlements: 'payment',
+        users: 'access',
+        auth: 'access',
+        settings: 'settings',
+      } as Record<string, string>)[entity] ?? 'settings';
+
     return {
-      data,
+      data: data.map((row) => {
+        const actor = row.user
+          ? `${row.user.firstName ?? ''} ${row.user.lastName ?? ''}`.trim() || row.user.email
+          : 'System';
+        return {
+          ...row,
+          at: row.createdAt,
+          actor,
+          actorRole: '',
+          target: row.entityId ? `${row.entity} · ${row.entityId}` : row.entity,
+          category: categoryOf(row.entity),
+        };
+      }),
       meta: {
         total,
         page,

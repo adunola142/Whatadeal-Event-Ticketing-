@@ -1,12 +1,14 @@
-import {
+ import {
   Injectable,
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  DeviceStatus,
   EventStatus,
   TransactionStatus,
   TicketStatus,
@@ -343,7 +345,7 @@ export class POSService {
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
-    deviceId?: string;
+    deviceId: string;
     paymentReference?: string;
   }) {
     // Idempotency: check if transaction ref already exists
@@ -373,6 +375,21 @@ export class POSService {
     });
     if (!assignment) {
       throw new BadRequestException('Operator not assigned to this event');
+    }
+
+    // Sales must come from a registered, active terminal assigned to this operator.
+    const device = await this.prisma.pOSDevice.findUnique({
+      where: { id: data.deviceId },
+    });
+    if (!device) throw new BadRequestException('Terminal is not registered');
+    if (device.status !== DeviceStatus.ACTIVE) {
+      throw new ForbiddenException(`Terminal is ${device.status.toLowerCase()} and cannot process sales`);
+    }
+    const deviceAssignment = await this.prisma.pOSDeviceAssignment.findFirst({
+      where: { operatorId: operator.id, deviceId: device.id, isActive: true },
+    });
+    if (!deviceAssignment) {
+      throw new ForbiddenException('Terminal is not assigned to this operator');
     }
 
     // Get event and validate eligibility ON EVERY SALE
@@ -549,7 +566,13 @@ export class POSService {
     const skip = (page - 1) * limit;
     const where: any = {};
     if (query.status) where.status = query.status;
-    if (scope && !isPlatformAdmin(scope.role)) {
+    if (scope && scope.role === UserRole.POS_OPERATOR) {
+      // Operators only ever see their own sales, never their whole org's.
+      const operator = await this.prisma.pOSOperator.findUnique({
+        where: { userId: scope.userId },
+      });
+      where.operatorId = operator?.id ?? '__none__';
+    } else if (scope && !isPlatformAdmin(scope.role)) {
       const ids = await userOrganizationIds(this.prisma, scope.userId);
       where.event = { organizationId: { in: ids } };
     }
@@ -569,7 +592,7 @@ export class POSService {
         orderBy: { createdAt: 'desc' },
         include: {
           items: { select: { quantity: true } },
-          event: { select: { id: true, title: true } },
+          event: { select: { id: true, title: true, organizationId: true } },
           operator: {
             include: { user: { select: { firstName: true, lastName: true } } },
           },

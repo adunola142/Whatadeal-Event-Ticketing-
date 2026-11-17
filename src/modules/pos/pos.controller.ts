@@ -124,8 +124,8 @@ export class POSController {
   }
 
   @Get('transactions')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN)
-  @ApiOperation({ summary: 'List all transactions (Admin)' })
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.POS_OPERATOR)
+  @ApiOperation({ summary: 'List transactions (Admin sees all; POS Operator sees only their own)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'status', required: false, type: String })

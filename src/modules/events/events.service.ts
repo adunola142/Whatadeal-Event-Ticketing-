@@ -1,8 +1,11 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EventStatus, UserRole } from '@prisma/client';
@@ -15,9 +18,39 @@ import {
   userOrganizationIds,
 } from '../../common/utils/organization-scope';
 
+const EXPIRY_SWEEP_MS = 60 * 60 * 1000;
+
 @Injectable()
-export class EventsService {
+export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
+  private readonly logger = new Logger(EventsService.name);
+  private expiryTimer?: NodeJS.Timeout;
+
   constructor(private prisma: PrismaService) {}
+
+  onApplicationBootstrap() {
+    void this.completeExpiredEvents();
+    this.expiryTimer = setInterval(() => void this.completeExpiredEvents(), EXPIRY_SWEEP_MS);
+    this.expiryTimer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
+  }
+
+  /** Marks active events whose end date has passed as completed, so they leave the POS list. */
+  async completeExpiredEvents() {
+    try {
+      const result = await this.prisma.event.updateMany({
+        where: { status: EventStatus.ACTIVE, endDate: { lt: new Date() } },
+        data: { status: EventStatus.COMPLETED },
+      });
+      if (result.count > 0) this.logger.log(`Completed ${result.count} expired event(s)`);
+      return result.count;
+    } catch (err) {
+      this.logger.warn(`Event expiry sweep failed: ${(err as Error).message}`);
+      return 0;
+    }
+  }
 
   async create(
     data: {
@@ -40,6 +73,13 @@ export class EventsService {
     if (scope) await requireOrgAccess(this.prisma, scope, organizationId);
     const slug = this.generateSlug(data.title);
 
+    // A Super Admin's own events don't need the org-admin approval workflow:
+    // they go straight to APPROVED, ready to publish & push to POS. Anyone
+    // else (org admin, event manager) still starts at DRAFT and must submit
+    // for approval.
+    const isSuperAdminCreated = scope?.role === UserRole.SUPER_ADMIN;
+    const now = new Date();
+
     return this.prisma.event.create({
       data: {
         organizationId,
@@ -56,7 +96,10 @@ export class EventsService {
         maxCapacity: data.maxCapacity,
         isPublic: data.isPublic ?? true,
         bannerImage: data.bannerImage,
-        status: EventStatus.DRAFT,
+        status: isSuperAdminCreated ? EventStatus.APPROVED : EventStatus.DRAFT,
+        ...(isSuperAdminCreated
+          ? { submittedAt: now, approvedById: scope!.userId, approvedAt: now }
+          : {}),
       },
     });
   }

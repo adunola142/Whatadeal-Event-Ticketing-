@@ -12,9 +12,11 @@ import { POSModule } from './modules/pos/pos.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SettlementsModule } from './modules/settlements/settlements.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 @Module({
   imports: [
@@ -32,6 +34,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     DashboardModule,
     SettlementsModule,
     AuditLogsModule,
+    SettingsModule,
   ],
   providers: [
     // Global JWT auth guard — use @Public() to skip
@@ -48,6 +51,11 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     {
       provide: APP_INTERCEPTOR,
       useClass: TransformInterceptor,
+    },
+    // Audit every successful write
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
     },
   ],
 })

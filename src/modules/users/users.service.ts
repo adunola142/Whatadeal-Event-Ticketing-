@@ -76,6 +76,7 @@ export class UsersService {
         role: true,
         isActive: true,
         emailVerified: true,
+        mustChangePassword: true,
         lastLoginAt: true,
         createdAt: true,
         organizationMemberships: {
@@ -123,7 +124,7 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await this.prisma.user.update({
       where: { id },
-      data: { passwordHash, refreshToken: null },
+      data: { passwordHash, refreshToken: null, mustChangePassword: true },
     });
 
     return { message: `Temporary password set for ${user.email}` };
@@ -155,6 +156,7 @@ export class UsersService {
         lastName: data.lastName,
         phone: data.phone,
         role: data.role,
+        mustChangePassword: true,
       },
       select: {
         id: true,

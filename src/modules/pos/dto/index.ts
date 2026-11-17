@@ -91,10 +91,10 @@ export class ProcessTransactionDto {
   @IsString()
   customerPhone?: string;
 
-  @ApiPropertyOptional({ example: 'device-uuid' })
-  @IsOptional()
+  @ApiProperty({ example: 'device-uuid' })
+  @IsNotEmpty()
   @IsString()
-  deviceId?: string;
+  deviceId: string;
 
   @ApiPropertyOptional({ example: 'PAY-REF-123' })
   @IsOptional()

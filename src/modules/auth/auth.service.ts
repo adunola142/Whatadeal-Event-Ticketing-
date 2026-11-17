@@ -48,6 +48,7 @@ export class AuthService {
         firstName: true,
         lastName: true,
         role: true,
+        mustChangePassword: true,
         createdAt: true,
       },
     });
@@ -83,6 +84,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        mustChangePassword: user.mustChangePassword,
       },
       ...tokens,
     };
@@ -157,6 +159,7 @@ export class AuthService {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 
@@ -218,6 +221,7 @@ export class AuthService {
       data: {
         passwordHash: newHash,
         refreshToken: null,
+        mustChangePassword: false,
       },
     });
 
