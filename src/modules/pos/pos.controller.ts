@@ -18,6 +18,7 @@ import {
   RegisterDeviceDto,
   AssignOperatorDto,
   ProcessTransactionDto,
+  RecordFailedTransactionDto,
   ProcessRefundDto,
   AssignDeviceDto,
   ResetPasswordDto,
@@ -121,6 +122,26 @@ export class POSController {
       ...data,
       operatorUserId: userId,
     });
+  }
+
+  @Post('transactions/failed')
+  @Roles(UserRole.POS_OPERATOR)
+  @ApiOperation({ summary: 'Log a sale attempt that never completed (POS Operator)' })
+  recordFailedTransaction(
+    @CurrentUser('id') userId: string,
+    @Body() data: RecordFailedTransactionDto,
+  ) {
+    return this.posService.recordFailedTransaction({
+      ...data,
+      operatorUserId: userId,
+    });
+  }
+
+  @Get('my-device')
+  @Roles(UserRole.POS_OPERATOR)
+  @ApiOperation({ summary: "Get the terminal assigned to me (POS Operator)" })
+  getMyDevice(@CurrentUser('id') userId: string) {
+    return this.posService.getMyDevice(userId);
   }
 
   @Get('transactions')

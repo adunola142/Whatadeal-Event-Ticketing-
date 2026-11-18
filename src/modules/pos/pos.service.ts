@@ -550,6 +550,103 @@ export class POSService {
   }
 
   /**
+   * Logs a card/cash/transfer attempt that never completed (declined,
+   * cancelled, terminal/network error) — so failed sales attempts show up
+   * in reporting without ever touching ticket inventory, tickets, or a
+   * receipt. The same operator/device/event checks as a real sale still
+   * apply, so this can't be used to spam records for an event/device the
+   * caller has no business selling for.
+   */
+  async recordFailedTransaction(data: {
+    transactionRef: string;
+    eventId: string;
+    operatorUserId: string;
+    items?: Array<{ ticketCategoryId: string; quantity: number }>;
+    paymentMethod: 'CARD' | 'CASH' | 'TRANSFER';
+    deviceId: string;
+    failureReason?: string;
+  }) {
+    const existing = await this.prisma.transaction.findUnique({
+      where: { transactionRef: data.transactionRef },
+    });
+    if (existing) {
+      throw new ConflictException('Transaction reference already exists');
+    }
+
+    const operator = await this.prisma.pOSOperator.findUnique({
+      where: { userId: data.operatorUserId },
+    });
+    if (!operator) throw new NotFoundException('Operator not found');
+
+    const assignment = await this.prisma.eventAssignment.findFirst({
+      where: { operatorId: operator.id, eventId: data.eventId, isActive: true },
+    });
+    if (!assignment) {
+      throw new BadRequestException('Operator not assigned to this event');
+    }
+
+    const device = await this.prisma.pOSDevice.findUnique({
+      where: { id: data.deviceId },
+    });
+    if (!device) throw new BadRequestException('Terminal is not registered');
+    const deviceAssignment = await this.prisma.pOSDeviceAssignment.findFirst({
+      where: { operatorId: operator.id, deviceId: device.id, isActive: true },
+    });
+    if (!deviceAssignment) {
+      throw new ForbiddenException('Terminal is not assigned to this operator');
+    }
+
+    // Price what was attempted, where the categories are still known, purely
+    // for reporting — no stock is touched either way.
+    let totalAmount = 0;
+    const items = data.items ?? [];
+    if (items.length) {
+      const categories = await this.prisma.ticketCategory.findMany({
+        where: { id: { in: items.map((i) => i.ticketCategoryId) } },
+      });
+      for (const item of items) {
+        const category = categories.find((c) => c.id === item.ticketCategoryId);
+        if (category) totalAmount += Number(category.price) * item.quantity;
+      }
+    }
+
+    const transaction = await this.prisma.transaction.create({
+      data: {
+        transactionRef: data.transactionRef,
+        eventId: data.eventId,
+        operatorId: operator.id,
+        totalAmount,
+        paymentMethod: data.paymentMethod,
+        status: TransactionStatus.FAILED,
+        deviceId: data.deviceId,
+        metadata: data.failureReason ? { failureReason: data.failureReason } : undefined,
+      },
+    });
+
+    return { message: 'Failed transaction recorded', transaction };
+  }
+
+  /**
+   * The POS device currently assigned to this operator (if any) — lets the
+   * app resolve its own deviceId for POST /pos/transactions without the
+   * POS_OPERATOR role needing access to the admin-only device list.
+   */
+  async getMyDevice(userId: string) {
+    const operator = await this.prisma.pOSOperator.findUnique({
+      where: { userId },
+    });
+    if (!operator) throw new NotFoundException('Operator profile not found');
+
+    const assignment = await this.prisma.pOSDeviceAssignment.findFirst({
+      where: { operatorId: operator.id, isActive: true },
+      include: { device: true },
+      orderBy: { assignedAt: 'desc' },
+    });
+
+    return assignment?.device ?? null;
+  }
+
+  /**
    * List all transactions (admin). Returns data in a shape compatible with the admin UI.
    */
   async listTransactions(

@@ -2,10 +2,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString, IsNumber, IsBoolean, IsDateString } from 'class-validator';
 
 export class CreateEventDto {
-  @ApiProperty({ example: 'org-uuid-here' })
-  @IsNotEmpty()
+  // Optional: a Super Admin can create an event with no organization at
+  // all (a Whatadeal-direct event). Anyone else must supply one — enforced
+  // in EventsService.create via requireOrgAccess, not here, since that's
+  // where the caller's role is known.
+  @ApiPropertyOptional({ example: 'org-uuid-here' })
+  @IsOptional()
   @IsString()
-  organizationId: string;
+  organizationId?: string;
 
   @ApiProperty({ example: 'Lagos Music Festival 2026' })
   @IsNotEmpty()

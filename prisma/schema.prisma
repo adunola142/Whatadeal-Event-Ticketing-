@@ -157,7 +157,7 @@ model OrganizationMember {
 
 model Event {
   id              String      @id @default(uuid())
-  organizationId  String      @map("organization_id")
+  organizationId  String?     @map("organization_id")
   title           String
   slug            String      @unique
   description     String?
@@ -183,7 +183,7 @@ model Event {
   updatedAt       DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  organization     Organization      @relation(fields: [organizationId], references: [id])
+  organization     Organization?     @relation(fields: [organizationId], references: [id])
   approvedBy       User?             @relation("EventApprover", fields: [approvedById], references: [id])
   ticketCategories TicketCategory[]
   eventAssignments EventAssignment[]

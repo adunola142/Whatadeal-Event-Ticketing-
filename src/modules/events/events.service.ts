@@ -67,9 +67,12 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
       isPublic?: boolean;
       bannerImage?: string;
     },
-    organizationId: string,
+    organizationId: string | undefined,
     scope?: AccessScope,
   ) {
+    // requireOrgAccess lets a platform admin through regardless of
+    // organizationId, but still demands one from anyone else — so a
+    // missing org here can only ever belong to a Super Admin's event.
     if (scope) await requireOrgAccess(this.prisma, scope, organizationId);
     const slug = this.generateSlug(data.title);
 
@@ -82,7 +85,7 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
 
     return this.prisma.event.create({
       data: {
-        organizationId,
+        organizationId: organizationId || undefined,
         title: data.title,
         slug,
         description: data.description,
@@ -358,6 +361,33 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
+   * Permanently deletes an event — Super Admin only, and only while it has
+   * no transactions. An event that has ever sold a ticket is cancelled,
+   * never deleted, so the sales record stays intact.
+   */
+  async remove(id: string) {
+    const event = await this.prisma.event.findUnique({ where: { id } });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const transactionCount = await this.prisma.transaction.count({
+      where: { eventId: id },
+    });
+    if (transactionCount > 0) {
+      throw new BadRequestException(
+        'This event already has transactions and cannot be deleted — cancel it instead.',
+      );
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.eventAssignment.deleteMany({ where: { eventId: id } }),
+      this.prisma.ticketCategory.deleteMany({ where: { eventId: id } }),
+      this.prisma.event.delete({ where: { id } }),
+    ]);
+
+    return { message: 'Event deleted' };
+  }
+
+  /**
    * Check if event is eligible for ticket sales.
    * Called on EVERY sale attempt — not just cron-based.
    */
@@ -378,7 +408,17 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
     return { eligible: true };
   }
 
-  private async verifyOrgMembership(userId: string, organizationId: string) {
+  private async verifyOrgMembership(
+    userId: string,
+    organizationId: string | null,
+  ) {
+    if (!organizationId) {
+      // No non-admin should ever reach here for an org-less event — only
+      // a Super Admin can create one, and callers only invoke this when
+      // userRole !== SUPER_ADMIN. Treat it as unauthorized rather than
+      // querying a membership that can't exist.
+      throw new ForbiddenException('Not a member of this organization');
+    }
     const member = await this.prisma.organizationMember.findUnique({
       where: {
         userId_organizationId: { userId, organizationId },

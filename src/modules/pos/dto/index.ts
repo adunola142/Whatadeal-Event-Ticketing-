@@ -102,6 +102,43 @@ export class ProcessTransactionDto {
   paymentReference?: string;
 }
 
+/// A card/cash/transfer attempt that never completed (declined, timed out,
+/// terminal error) — logged for reporting, but never touches ticket
+/// inventory or creates tickets/a receipt, unlike ProcessTransactionDto.
+export class RecordFailedTransactionDto {
+  @ApiProperty({ example: 'TXN-20261120-ABC123' })
+  @IsNotEmpty()
+  @IsString()
+  transactionRef: string;
+
+  @ApiProperty({ example: 'event-uuid' })
+  @IsNotEmpty()
+  @IsString()
+  eventId: string;
+
+  @ApiPropertyOptional({ type: [TransactionItemDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TransactionItemDto)
+  items?: TransactionItemDto[];
+
+  @ApiProperty({ enum: ['CARD', 'CASH', 'TRANSFER'], example: 'CARD' })
+  @IsNotEmpty()
+  @IsString()
+  paymentMethod: 'CARD' | 'CASH' | 'TRANSFER';
+
+  @ApiProperty({ example: 'device-uuid' })
+  @IsNotEmpty()
+  @IsString()
+  deviceId: string;
+
+  @ApiPropertyOptional({ example: 'Card declined by issuer' })
+  @IsOptional()
+  @IsString()
+  failureReason?: string;
+}
+
 export class ProcessRefundDto {
   @ApiProperty({ example: 'TXN-20261120-ABC123' })
   @IsNotEmpty()

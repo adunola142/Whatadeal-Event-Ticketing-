@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -146,5 +147,12 @@ export class EventsController {
     @CurrentUser('role') actorRole: UserRole,
   ) {
     return this.eventsService.cancel(id, scopeOf(actorId, actorRole));
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Delete an event that has no transactions yet (Super Admin only)' })
+  remove(@Param('id') id: string) {
+    return this.eventsService.remove(id);
   }
 }
