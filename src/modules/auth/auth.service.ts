@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterDto, LoginDto } from './dto';
-import { UserRole } from '@prisma/client';
+import { DeviceStatus, UserRole } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -66,6 +66,14 @@ export class AuthService {
     const user = await this.validateUser(dto.email, dto.password);
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (user.role === UserRole.POS_OPERATOR) {
+      await this.verifyTerminal(user.id, dto.deviceSerial);
+    }
+
+    if (user.role === UserRole.ORG_ADMIN || user.role === UserRole.EVENT_MANAGER) {
+      await this.verifyOrganizationActive(user.id);
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
@@ -161,6 +169,75 @@ export class AuthService {
       role: user.role,
       mustChangePassword: user.mustChangePassword,
     };
+  }
+
+  /**
+   * A POS_OPERATOR may only sign in from a terminal that's registered,
+   * active, and currently assigned to them — enforced here, server-side,
+   * so a login can't be made possible just by skipping a client-side
+   * check in a patched build of the app. Rejects (no tokens issued)
+   * rather than letting the operator in and only blocking them later at
+   * the payment screen.
+   */
+  private async verifyTerminal(userId: string, deviceSerial?: string) {
+    if (!deviceSerial) {
+      throw new ForbiddenException(
+        'This app must run on a registered terminal — no device serial was provided.',
+      );
+    }
+
+    const device = await this.prisma.pOSDevice.findUnique({
+      where: { serialNumber: deviceSerial },
+    });
+    if (!device) {
+      throw new ForbiddenException(
+        'This terminal is not registered. Ask your Super Admin to register it before signing in.',
+      );
+    }
+    if (device.status !== DeviceStatus.ACTIVE) {
+      throw new ForbiddenException(
+        `This terminal is ${device.status.toLowerCase()} and cannot be used. Contact your admin.`,
+      );
+    }
+
+    const operator = await this.prisma.pOSOperator.findUnique({
+      where: { userId },
+    });
+    const assignment = operator
+      ? await this.prisma.pOSDeviceAssignment.findFirst({
+          where: { operatorId: operator.id, deviceId: device.id, isActive: true },
+        })
+      : null;
+    if (!assignment) {
+      throw new ForbiddenException(
+        'This terminal is not assigned to your account. Contact your admin.',
+      );
+    }
+  }
+
+  /**
+   * An ORG_ADMIN or EVENT_MANAGER signs in on behalf of an organization —
+   * if every organization they actively belong to has been suspended by
+   * Whatadeal, they should not get in either, even though their own
+   * account (isActive) is untouched. Checked here, server-side, same as
+   * the terminal check above. A user with no active membership at all
+   * is left alone — that's a different, pre-existing state, not what
+   * this check is for.
+   */
+  private async verifyOrganizationActive(userId: string) {
+    const memberships = await this.prisma.organizationMember.findMany({
+      where: { userId, isActive: true },
+      include: { organization: { select: { isActive: true } } },
+    });
+
+    if (memberships.length === 0) return;
+
+    const hasActiveOrg = memberships.some((m) => m.organization.isActive);
+    if (!hasActiveOrg) {
+      throw new ForbiddenException(
+        'Your organization has been suspended. Contact Whatadeal support.',
+      );
+    }
   }
 
   private async generateTokens(

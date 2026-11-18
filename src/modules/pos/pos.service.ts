@@ -102,6 +102,8 @@ export class POSService {
               email: true,
               firstName: true,
               lastName: true,
+              phone: true,
+              isActive: true,
             },
           },
           _count: { select: { eventAssignments: true } },

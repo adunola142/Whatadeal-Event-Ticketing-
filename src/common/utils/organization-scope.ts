@@ -73,7 +73,7 @@ export async function requireEventAccess(
 export async function requireTransactionAccess(
   prisma: PrismaService,
   scope: AccessScope,
-  tx: { event: { organizationId: string }; operator: { userId: string } },
+  tx: { event: { organizationId: string | null }; operator: { userId: string } },
 ): Promise<void> {
   if (isPlatformAdmin(scope.role)) return;
   if (scope.role === UserRole.POS_OPERATOR && tx.operator.userId === scope.userId) return;
