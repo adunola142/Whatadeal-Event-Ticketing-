@@ -224,8 +224,13 @@ export class POSService {
   // ============================================
 
   /**
-   * Get events assigned to an operator. Only ACTIVE events with valid dates
-   * are shown (backend validates eligibility on access).
+   * Get events assigned to an operator. Returns every event the operator
+   * is currently assigned to, whatever its status — the POS app shows
+   * Active/Inactive/All tabs over this same list rather than the backend
+   * pre-filtering it down to only-sellable events. Selling is still only
+   * ever allowed for an ACTIVE, not-yet-ended event: that's enforced
+   * server-side on every sale in processTransaction, independent of what
+   * this endpoint returns.
    */
   async getAssignedEvents(userId: string, includeHistory = false) {
     const operator = await this.prisma.pOSOperator.findUnique({
@@ -233,19 +238,14 @@ export class POSService {
     });
     if (!operator) throw new NotFoundException('Operator profile not found');
 
-    const now = new Date();
-
     const where: any = {
       operatorId: operator.id,
     };
 
     if (!includeHistory) {
-      // Only active assignments for non-ended events
+      // Still-current assignments only (an unassigned operator shouldn't
+      // see the event at all) — no filtering by event status/date here.
       where.isActive = true;
-      where.event = {
-        status: EventStatus.ACTIVE,
-        endDate: { gte: now }, // Backend-enforced: ended events don't show
-      };
     }
 
     const assignments = await this.prisma.eventAssignment.findMany({
@@ -690,10 +690,17 @@ export class POSService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          items: { select: { quantity: true } },
+          items: {
+            select: {
+              quantity: true,
+              unitPrice: true,
+              subtotal: true,
+              ticketCategory: { select: { name: true } },
+            },
+          },
           event: { select: { id: true, title: true, organizationId: true } },
           operator: {
-            include: { user: { select: { firstName: true, lastName: true } } },
+            include: { user: { select: { firstName: true, lastName: true, email: true } } },
           },
         },
       }),
@@ -706,6 +713,12 @@ export class POSService {
         amount: Number(t.totalAmount),
         ref: t.transactionRef,
         quantity: t.items.reduce((s, i) => s + i.quantity, 0),
+        items: t.items.map((i) => ({
+          name: i.ticketCategory.name,
+          quantity: i.quantity,
+          unitPrice: Number(i.unitPrice),
+          subtotal: Number(i.subtotal),
+        })),
       })),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };

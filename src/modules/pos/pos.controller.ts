@@ -97,7 +97,7 @@ export class POSController {
 
   @Get('my-events')
   @Roles(UserRole.POS_OPERATOR)
-  @ApiOperation({ summary: 'Get assigned active events (POS Operator)' })
+  @ApiOperation({ summary: 'Get all currently assigned events, any status (POS Operator)' })
   getMyEvents(@CurrentUser('id') userId: string) {
     return this.posService.getAssignedEvents(userId, false);
   }

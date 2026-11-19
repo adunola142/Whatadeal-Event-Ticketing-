@@ -20,6 +20,18 @@ import {
 
 const EXPIRY_SWEEP_MS = 60 * 60 * 1000;
 
+/**
+ * The admin and POS clients both read a ticket category's inventory as
+ * `capacity`, but the real Prisma column is `totalQuantity` — this adds
+ * `capacity` as an alias alongside the original fields so existing API
+ * consumers that already read `totalQuantity` keep working too.
+ */
+function withCapacityAlias<T extends { totalQuantity: number }>(
+  category: T,
+): T & { capacity: number } {
+  return { ...category, capacity: category.totalQuantity };
+}
+
 @Injectable()
 export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(EventsService.name);
@@ -147,6 +159,9 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
         orderBy: { createdAt: 'desc' },
         include: {
           organization: { select: { id: true, name: true } },
+          ticketCategories: {
+            select: { id: true, totalQuantity: true, soldQuantity: true },
+          },
           _count: { select: { ticketCategories: true, transactions: true } },
         },
       }),
@@ -154,7 +169,10 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
     ]);
 
     return {
-      data: events,
+      data: events.map((e) => ({
+        ...e,
+        ticketCategories: e.ticketCategories.map(withCapacityAlias),
+      })),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -170,7 +188,10 @@ export class EventsService implements OnApplicationBootstrap, OnModuleDestroy {
     });
     if (!event) throw new NotFoundException('Event not found');
     if (scope) await requireOrgAccess(this.prisma, scope, event.organizationId);
-    return event;
+    return {
+      ...event,
+      ticketCategories: event.ticketCategories.map(withCapacityAlias),
+    };
   }
 
   async update(
