@@ -1,14 +1,7 @@
-import { Injectable, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { Injectable, ExecutionContext } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator';
-
-/** Endpoints a user may call while they still have to change a temporary password. */
-const PASSWORD_CHANGE_EXEMPT = [
-  '/api/v1/auth/change-password',
-  '/api/v1/auth/logout',
-  '/api/v1/users/me',
-];
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -26,17 +19,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    const authenticated = await super.canActivate(context);
-    if (!authenticated) return false;
-
-    const req = context.switchToHttp().getRequest();
-    const url: string = (req.originalUrl ?? req.url ?? '').split('?')[0];
-    if (
-      req.user?.mustChangePassword &&
-      !PASSWORD_CHANGE_EXEMPT.some((p) => url === p || url.startsWith(p + '/'))
-    ) {
-      throw new ForbiddenException('Password change required');
-    }
-    return true;
+    // NOTE: this guard no longer blocks requests when mustChangePassword is
+    // set. The backend still issues/flags temporary passwords (see
+    // users.service.ts, organizations.service.ts), but nothing in the POS
+    // app yet has a change-password screen to act on that flag, so
+    // enforcing it here locked operators out of every endpoint with no way
+    // to resolve it. Re-enable the block once the POS app has that screen.
+    return super.canActivate(context) as Promise<boolean>;
   }
 }
