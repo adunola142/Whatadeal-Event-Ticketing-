@@ -29,6 +29,8 @@ export class DashboardService {
       totalOperators,
       totalRevenue,
       totalTransactions,
+      failedTransactions,
+      ticketsSold,
     ] = await Promise.all([
       this.prisma.organization.count(),
       this.prisma.event.count(),
@@ -44,7 +46,25 @@ export class DashboardService {
       this.prisma.transaction.count({
         where: { status: TransactionStatus.COMPLETED },
       }),
+      this.prisma.transaction.count({
+        where: { status: TransactionStatus.FAILED },
+      }),
+      // Platform-wide tickets sold: valid/used tickets whose transaction
+      // actually completed. Mirrors getOrgStats' per-organization query
+      // below, just without the organizationId filter.
+      this.prisma.ticket.count({
+        where: {
+          status: { in: [TicketStatus.VALID, TicketStatus.USED] },
+          transaction: { status: TransactionStatus.COMPLETED },
+        },
+      }),
     ]);
+
+    // Success rate = completed / (completed + failed), matching the admin
+    // dashboard's own definition (lib/analytics.ts' summarize()) so the two
+    // never disagree. Pending/processing transactions haven't resolved yet
+    // and are excluded, same as there.
+    const attempts = totalTransactions + failedTransactions;
 
     return {
       totalOrganizations: totalOrgs,
@@ -54,6 +74,9 @@ export class DashboardService {
       totalOperators,
       totalRevenue: totalRevenue._sum.totalAmount || 0,
       totalTransactions,
+      failedTransactions,
+      totalTicketsSold: ticketsSold,
+      paymentSuccessRate: attempts ? (totalTransactions / attempts) * 100 : 0,
     };
   }
 
